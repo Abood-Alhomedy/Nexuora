@@ -1,0 +1,3 @@
+# 
+
+{"status":false,"message":"ADB not available on this server.","data":{"devices":[]}}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "291159069281",
+    "project_id": "nexuora-app",
+    "storage_bucket": "nexuora-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:291159069281:android:ef49622d02ca6d2f6cd020",
+        "android_client_info": {
+          "package_name": "com.nexuora.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA7FAcA-3vzTkbM3Pw9CWxYvaNbrRz7AiI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

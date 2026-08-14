@@ -1,0 +1,77 @@
+name: nexuora
+description: "Nexuora - Flutter UI Builder Platform."
+
+publish_to: 'none'
+
+version: 0.9.0
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+    
+  cupertino_icons: 
+  flutter_localizations:
+    sdk: flutter
+  nb_utils: 
+  firebase_core:
+  package_info_plus:
+  firebase_auth: 
+  screenshot: 
+  flutter_mobx:
+  get_it: 
+  google_fonts:
+  flutter_dotenv: 
+  flutter_svg:
+  flutter_otp_text_field: 
+  lottie: 
+  smooth_page_indicator: 
+  flutter_rating_bar: 
+
+  google_maps: 
+
+  flutter_switch: 
+  cached_network_image: 
+  url_launcher: 
+  flutter_treeview: 
+  g_recaptcha_v3: 
+  google_sign_in: 
+  just_audio:
+  rxdart: 
+
+  video_player:
+  youtube_player_iframe: 
+
+  file_picker: 
+  reorderables: 
+
+  fl_chart: 
+  firebase_analytics:
+  image_picker:
+  http: 
+  
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  build_runner: ^2.5.0
+  mobx_codegen: ^2.7.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - .env
+    - images/
+
+  fonts:
+      - family: Inter
+        fonts:
+          - asset: font/Inter-Regular.ttf
+          - asset: font/Inter-Bold.ttf
+          - asset: font/Inter-Medium.ttf
+          - asset: font/Inter-SemiBold.ttf  
