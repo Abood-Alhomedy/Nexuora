@@ -11,15 +11,18 @@ use App\AI\Services\TargetResolver;
 use App\AI\Services\Planner;
 use App\AI\Services\ActionValidator;
 use App\AI\Services\ConversationManager;
+use App\AI\Services\ProjectMemoryService;
 use App\Models\AiConversation;
 use App\Models\AiMessage;
+use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 
 class AIController
 {
-    private AIOrchestrator $orchestrator;
+    private AIOrchestrator     $orchestrator;
+    private ConversationManager $conversationManager;
 
     public function __construct()
     {
@@ -31,10 +34,12 @@ class AIController
         $planner      = new Planner();
         $validator    = new ActionValidator();
         $convManager  = new ConversationManager();
+        $memService   = new ProjectMemoryService();
 
-        $this->orchestrator = new AIOrchestrator(
-            $llm, $contextB, $intentA, $targetR, $planner, $validator, $convManager
+        $this->orchestrator      = new AIOrchestrator(
+            $llm, $contextB, $intentA, $targetR, $planner, $validator, $convManager, $memService
         );
+        $this->conversationManager = $convManager;
     }
 
     /**
@@ -81,7 +86,6 @@ class AIController
          'payload' => $request->all(),
          ]);
 
-$result = $this->orchestrator->process($request->all(), $userId);
         $result = $this->orchestrator->process($request->all(), $userId);
 
         $httpCode = $result['status'] ? 200 : 400;
@@ -170,10 +174,45 @@ $result = $this->orchestrator->process($request->all(), $userId);
      */
     public function deleteConversation(Request $request, int $id): JsonResponse
     {
-        $userId = $request->user()->id;
+        $userId  = $request->user()->id;
         $deleted = AiConversation::where('id', $id)->where('user_id', $userId)->delete();
 
         return response()->json(['status' => (bool) $deleted]);
+    }
+
+    /**
+     * POST /api/ai/conversations
+     * Explicitly create a new conversation for a project.
+     */
+    public function createConversation(Request $request): JsonResponse
+    {
+        $v = Validator::make($request->all(), [
+            'project_id' => 'required|integer',
+        ]);
+
+        if ($v->fails()) {
+            return response()->json(['status' => false, 'message' => 'Validation failed.', 'errors' => $v->errors()], 422);
+        }
+
+        $userId    = $request->user()->id;
+        $projectId = (int) $request->input('project_id');
+
+        // Verify the authenticated user owns this project
+        $project = Project::where('id', $projectId)->where('user_id', $userId)->first();
+        if (!$project) {
+            return response()->json(['status' => false, 'message' => 'Project not found.'], 404);
+        }
+
+        $conversation = $this->conversationManager->createConversation($userId, $projectId);
+
+        return response()->json([
+            'status' => true,
+            'data'   => [
+                'id'         => $conversation->id,
+                'title'      => $conversation->title,
+                'created_at' => $conversation->created_at,
+            ],
+        ], 201);
     }
 
     /**

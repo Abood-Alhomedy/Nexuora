@@ -179,6 +179,22 @@ class AiActionExecutor {
     }
 
     _applyProperties(widget, descriptor.properties);
+
+    // Force MobX observables to trigger for page-level widgets
+    if (appStore.appBarClass != null && appStore.appBarClass!.id == widgetId) {
+      final temp = appStore.appBarClass!;
+      appStore.appBarClass = null;
+      appStore.appBarClass = temp;
+    } else if (appStore.drawerClass != null && appStore.drawerClass!.id == widgetId) {
+      final temp = appStore.drawerClass!;
+      appStore.drawerClass = null;
+      appStore.drawerClass = temp;
+    } else if (appStore.bottomNavigationBarClass != null && appStore.bottomNavigationBarClass!.id == widgetId) {
+      final temp = appStore.bottomNavigationBarClass!;
+      appStore.bottomNavigationBarClass = null;
+      appStore.bottomNavigationBarClass = temp;
+    }
+
     appStore.refreshMainViewData();
 
     return AiActionResult(
@@ -479,6 +495,10 @@ class AiActionExecutor {
   // ─────────────────────────────────────────────────────────
 
   static WidgetModel? _findWidgetById(String id) {
+    if (appStore.appBarClass != null && appStore.appBarClass!.id == id) return appStore.appBarClass;
+    if (appStore.drawerClass != null && appStore.drawerClass!.id == id) return appStore.drawerClass;
+    if (appStore.bottomNavigationBarClass != null && appStore.bottomNavigationBarClass!.id == id) return appStore.bottomNavigationBarClass;
+
     if (appStore.selectedWidgetList.isEmpty) return null;
     return _searchInWidget(appStore.selectedWidgetList[0], id);
   }

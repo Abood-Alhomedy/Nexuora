@@ -15,6 +15,7 @@ use App\Http\Controllers\API\AI\AIController;
 | API Routes
 |--------------------------------------------------------------------------
 */
+use App\Http\Controllers\API\AIGeneratorController;
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
@@ -61,10 +62,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('chat',                          [AIController::class, 'chat']);
         Route::post('chat/{batch_id}/confirm',       [AIController::class, 'confirmPlan']);
         Route::post('chat/{batch_id}/apply-results', [AIController::class, 'applyResults']);
+        Route::post('conversations',                 [AIController::class, 'createConversation']);
         Route::get('conversations',                  [AIController::class, 'conversationList']);
         Route::get('conversations/{id}/messages',    [AIController::class, 'messageList']);
         Route::delete('conversations/{id}',          [AIController::class, 'deleteConversation']);
         Route::get('health',                         [AIController::class, 'health']);
     });
+    
+Route::post(
+    '/ai/backend/generate',
+    [AIGeneratorController::class, 'generate']
+);
+
 
 });

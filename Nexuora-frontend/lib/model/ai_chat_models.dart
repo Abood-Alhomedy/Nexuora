@@ -8,6 +8,7 @@
 
 // ─── Request ─────────────────────────────────────────────────────────────────
 
+
 class AiChatRequest {
   final int projectId;
   final String message;
@@ -16,11 +17,13 @@ class AiChatRequest {
   final String? selectedWidgetId;
   final String? selectedWidgetType;
   final String? currentParentWidgetId;
+  final int userId;
 
   const AiChatRequest({
     required this.projectId,
     required this.message,
-    this.screenId,
+    required this.userId,
+    required this.screenId,
     this.conversationId,
     this.selectedWidgetId,
     this.selectedWidgetType,
@@ -30,6 +33,7 @@ class AiChatRequest {
   Map<String, dynamic> toJson() => {
         'project_id': projectId,
         'message': message,
+        'userId':userId,
         if (screenId != null) 'screen_id': screenId,
         if (conversationId != null) 'conversation_id': conversationId,
         if (selectedWidgetId != null) 'selected_widget_id': selectedWidgetId,

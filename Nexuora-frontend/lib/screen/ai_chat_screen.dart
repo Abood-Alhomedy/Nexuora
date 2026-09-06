@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
+import 'package:nb_utils/nb_utils.dart';
 import '../store/ai_chat_store.dart';
 import '../model/ai_chat_models.dart';
+import '../network/ai_api_client.dart';
+import '../utils/AppConstant.dart';
 
 /// AiChatScreen — sliding AI chat panel overlay.
 ///
@@ -27,6 +30,7 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
   final ScrollController _scrollCtrl = ScrollController();
   late final AnimationController _animCtrl;
   late final Animation<double> _fadeAnim;
+  bool _showSidebar = false;
 
   @override
   void initState() {
@@ -36,14 +40,18 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _animCtrl.forward();
 
-    // Add welcome message
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _store.messages.add(AiChatMessage(
-        id: 'welcome',
-        role: AiMessageRole.assistant,
-        content: '👋 Hi! I\'m your AI assistant.\n\nTell me what to build — for example:\n• "Add a blue button below the text"\n• "Create a login screen"\n• "Change the text color to red"',
-        timestamp: DateTime.now(),
-      ));
+    // Load existing conversation from backend; show welcome only if none found
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _store.loadOrCreateLastConversation();
+      // Show welcome if this is a completely fresh conversation
+      if (_store.messages.isEmpty) {
+        _store.messages.add(AiChatMessage(
+          id: 'welcome',
+          role: AiMessageRole.assistant,
+          content: '👋 Hi! I\'m your AI assistant.\n\nTell me what to build — for example:\n• "Add a blue button below the text"\n• "Create a login screen"\n• "Change the text color to red"',
+          timestamp: DateTime.now(),
+        ));
+      }
     });
   }
 
@@ -69,17 +77,27 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
             left: BorderSide(color: Color(0xFF3D4A6B), width: 1),
           ),
         ),
-        child: Column(
+        child: Stack(
           children: [
-            _buildHeader(context),
-            Expanded(child: _buildMessageList()),
+            // ── Main chat column ──
+            Column(
+              children: [
+                _buildHeader(context),
+                Expanded(child: _buildMessageList()),
+                Observer(builder: (_) {
+                  if (_store.pendingConfirmMessage != null) {
+                    return _buildConfirmBanner();
+                  }
+                  return const SizedBox.shrink();
+                }),
+                _buildInputBar(context),
+              ],
+            ),
+            // ── Conversation sidebar (slides over the chat) ──
             Observer(builder: (_) {
-              if (_store.pendingConfirmMessage != null) {
-                return _buildConfirmBanner();
-              }
-              return const SizedBox.shrink();
+              if (!_showSidebar) return const SizedBox.shrink();
+              return _buildSidebar(context);
             }),
-            _buildInputBar(context),
           ],
         ),
       ),
@@ -92,7 +110,7 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
 
   Widget _buildHeader(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
@@ -102,6 +120,15 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
       ),
       child: Row(
         children: [
+          // History sidebar toggle
+          IconButton(
+            icon: const Icon(Icons.history, color: Colors.white70, size: 18),
+            tooltip: 'Conversation history',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            onPressed: () => setState(() => _showSidebar = !_showSidebar),
+          ),
+          const SizedBox(width: 8),
           const Icon(Icons.auto_awesome, color: Colors.white, size: 20),
           const SizedBox(width: 8),
           const Text(
@@ -113,19 +140,27 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
             ),
           ),
           const Spacer(),
-          Observer(builder: (_) {
-            if (_store.messages.length > 1) {
-              return IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.white70, size: 18),
-                tooltip: 'New conversation',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                onPressed: _store.clearMessages,
-              );
-            }
-            return const SizedBox.shrink();
-          }),
-          const SizedBox(width: 8),
+          // New conversation button
+          IconButton(
+            icon: const Icon(Icons.add_comment_outlined, color: Colors.white70, size: 18),
+            tooltip: 'New conversation',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            onPressed: () async {
+              await _store.createNewConversation();
+              // Show welcome in fresh conversation
+              if (_store.messages.isEmpty) {
+                _store.messages.add(AiChatMessage(
+                  id: 'welcome_new',
+                  role: AiMessageRole.assistant,
+                  content: '✨ New conversation started! What would you like to build?',
+                  timestamp: DateTime.now(),
+                ));
+              }
+            },
+          ),
+          const SizedBox(width: 4),
+          // Close panel
           IconButton(
             icon: const Icon(Icons.close, color: Colors.white70, size: 18),
             padding: EdgeInsets.zero,
@@ -143,6 +178,20 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
 
   Widget _buildMessageList() {
     return Observer(builder: (_) {
+      // Show spinner while loading history from backend
+      if (_store.isLoadingHistory) {
+        return const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: Color(0xFF4F46E5), strokeWidth: 2),
+              SizedBox(height: 12),
+              Text('Loading conversation...', style: TextStyle(color: Colors.white38, fontSize: 12)),
+            ],
+          ),
+        );
+      }
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollCtrl.hasClients) {
           _scrollCtrl.animateTo(
@@ -430,6 +479,162 @@ class _AiChatScreenState extends State<AiChatScreen> with SingleTickerProviderSt
     if (text.isEmpty) return;
     _inputCtrl.clear();
     _store.sendMessage(text, context);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Conversation sidebar
+  // ─────────────────────────────────────────────────────────
+
+  Widget _buildSidebar(BuildContext context) {
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          // Dim overlay — tap to close
+          GestureDetector(
+            onTap: () => setState(() => _showSidebar = false),
+            child: Container(color: Colors.black54),
+          ),
+          // Sidebar panel
+          Positioned(
+            top: 0,
+            left: 0,
+            bottom: 0,
+            width: 280,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF141824),
+                border: Border(
+                  right: BorderSide(color: Color(0xFF3D4A6B), width: 1),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Header ──
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+                    decoration: const BoxDecoration(
+                      border: Border(bottom: BorderSide(color: Color(0xFF252D40))),
+                    ),
+                    child: Row(
+                      children: [
+                        const Text('History',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        // New conversation button in sidebar
+                        IconButton(
+                          icon: const Icon(Icons.add, color: Color(0xFF4F46E5), size: 20),
+                          tooltip: 'New conversation',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () async {
+                            setState(() => _showSidebar = false);
+                            await _store.createNewConversation();
+                            if (_store.messages.isEmpty) {
+                              _store.messages.add(AiChatMessage(
+                                id: 'welcome_new',
+                                role: AiMessageRole.assistant,
+                                content: '✨ New conversation started! What would you like to build?',
+                                timestamp: DateTime.now(),
+                              ));
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ── Conversation list ──
+                  Expanded(
+                    child: Observer(builder: (_) {
+                      if (_store.conversationList.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text('No conversations yet.',
+                              style: TextStyle(color: Colors.white38, fontSize: 12)),
+                        );
+                      }
+                      return ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: _store.conversationList.length,
+                        itemBuilder: (ctx, i) {
+                          final conv = _store.conversationList[i];
+                          final convId = conv['id'] as int?;
+                          final title = conv['title'] as String? ?? 'AI Session';
+                          final isActive = convId == _store.conversationId;
+                          return ListTile(
+                            dense: true,
+                            selected: isActive,
+                            selectedColor: const Color(0xFF4F46E5),
+                            selectedTileColor: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                            leading: Icon(
+                              Icons.chat_bubble_outline,
+                              size: 16,
+                              color: isActive ? const Color(0xFF4F46E5) : Colors.white38,
+                            ),
+                            title: Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isActive ? Colors.white : Colors.white70,
+                                fontSize: 12,
+                                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline,
+                                  size: 16, color: Colors.white24),
+                              tooltip: 'Delete',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: convId == null
+                                  ? null
+                                  : () async {
+                                      final token = await getStringAsync(TOKEN);
+                                      final ok = await AiApiClient.deleteConversation(
+                                        conversationId: convId,
+                                        token: token,
+                                      );
+                                      if (ok) {
+                                        _store.removeConversationFromList(convId);
+                                        if (_store.conversationList.isNotEmpty) {
+                                          final next = _store.conversationList.first;
+                                          await _store.switchConversation(next['id'] as int);
+                                        } else {
+                                          // Start fresh
+                                          _store.messages.add(AiChatMessage(
+                                            id: 'welcome_empty',
+                                            role: AiMessageRole.assistant,
+                                            content: '✨ Start a new conversation!',
+                                            timestamp: DateTime.now(),
+                                          ));
+                                        }
+                                      }
+                                    },
+                            ),
+                            onTap: convId == null
+                                ? null
+                                : () async {
+                                    setState(() => _showSidebar = false);
+                                    await _store.switchConversation(convId);
+                                  },
+                          );
+                        },
+                      );
+                    }),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

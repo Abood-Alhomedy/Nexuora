@@ -34,6 +34,8 @@ import 'feedback_dialog.dart';
 
 import 'dart:convert';
 import 'dart:html' as webFile;
+import '../screen/ai_chat_screen.dart';
+import '../screen/backend_chat_screen.dart';
 
 class HeaderComponent extends StatefulWidget {
   @override
@@ -391,6 +393,7 @@ class MyApp extends StatelessWidget {
       createDartFile(0, true);
     }
   }
+
 
   Future<void> _saveCurrentScreenAsWidget() async {
     String? name = await showDialog<String>(
@@ -756,6 +759,49 @@ class MyApp extends StatelessWidget {
                               );
                             }),
                             16.width,
+
+                                                         /// Backend Builder Button
+                             OnHover(builder: (isHovered) {
+                               return elevationButtonHighLightColor(
+                                 isHovered: isHovered,
+                                 child: Container(
+                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                   decoration: BoxDecoration(
+                                     gradient: const LinearGradient(
+                                       colors: [Color(0xFF059669), Color(0xFF047857)],
+                                       begin: Alignment.centerLeft,
+                                       end: Alignment.centerRight,
+                                     ),
+                                     borderRadius: BorderRadius.circular(8),
+                                   ),
+                                   child: const Row(
+                                     mainAxisSize: MainAxisSize.min,
+                                     children: [
+                                       Icon(Icons.code_rounded, color: Colors.white, size: 15),
+                                       SizedBox(width: 5),
+                                       Text('Backend', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                                     ],
+                                   ),
+                                 ),
+                                 toolTipMessage: 'Backend Builder',
+                                 onPressed: () {
+                                   showDialog(
+                                     context: context,
+                                     barrierColor: Colors.transparent,
+                                     builder: (_) => Align(
+                                       alignment: Alignment.centerRight,
+                                       child: Material(
+                                         color: Colors.transparent,
+                                         child: BackendChatScreen(
+                                           projectId: appStore.projectId ?? 0,
+                                         ),
+                                       ),
+                                     ),
+                                   );
+                                 },
+                               );
+                             }),
+                             16.width,
                           ],
                         )
                       : SizedBox(),

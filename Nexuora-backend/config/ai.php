@@ -8,6 +8,18 @@ return [
     */
     'enabled' => env('AI_ENABLED', true),
 
+
+    'openrouter' => [
+        'api_key' => env('OPENROUTER_API_KEY'),
+        'model' => env('OPENROUTER_MODEL'),
+        'base_url' => 'https://openrouter.ai/api/v1',
+    ],
+
+    'generation' => [
+        'temperature' => 0.2,
+        'max_attempts' => 3,
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | LLM Provider
@@ -63,5 +75,15 @@ return [
             'base_url' => 'https://openrouter.ai/api/v1',
             'referer'  => env('APP_URL', 'http://localhost'),
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Conversation Context Settings
+    |--------------------------------------------------------------------------
+    */
+    'context' => [
+        'recent_messages' => (int) env('AI_CONTEXT_RECENT_MESSAGES', 15),
+        'max_memories'    => (int) env('AI_CONTEXT_MAX_MEMORIES', 10),
     ],
 ];

@@ -13,6 +13,8 @@ class AiApiClient {
     return b.endsWith('/') ? b.substring(0, b.length - 1) : b;
   }
 
+
+
 /// POST /api/ai/chat — send a user message.
 static Future<AiChatResponse> sendMessage({
   required AiChatRequest request,
@@ -124,6 +126,27 @@ static Future<AiChatResponse> sendMessage({
 
     final body = jsonDecode(response.body);
     return body['status'] == true;
+  }
+
+  /// POST /api/ai/conversations — explicitly create a new conversation.
+  static Future<Map<String, dynamic>?> createConversation({
+    required int projectId,
+    required String token,
+  }) async {
+    final uri = Uri.parse('$_base/ai/conversations');
+    final response = await http
+        .post(
+          uri,
+          headers: _headers(token),
+          body: jsonEncode({'project_id': projectId}),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final body = jsonDecode(response.body);
+    if (body['status'] == true) {
+      return Map<String, dynamic>.from(body['data'] ?? {});
+    }
+    return null;
   }
 
   /// GET /api/ai/health

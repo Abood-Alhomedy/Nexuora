@@ -234,7 +234,11 @@ toJsonColor(Color color) {
 }
 
 fromJsonColor(String hexString) {
-  return Color(int.parse(hexString.replaceFirst('#', ''), radix: 16));
+  String hex = hexString.replaceFirst('#', '');
+  if (hex.length == 6) {
+    hex = 'FF' + hex;
+  }
+  return Color(int.parse(hex, radix: 16));
 }
 
 toJsonPadding(EdgeInsets padding) {

@@ -115,6 +115,38 @@ class ConversationManager
     }
 
     /**
+     * Explicitly create a new conversation (used by the createConversation API endpoint).
+     */
+    public function createConversation(int $userId, int $projectId, ?string $title = null): AiConversation
+    {
+        return AiConversation::create([
+            'user_id'    => $userId,
+            'project_id' => $projectId,
+            'title'      => $title ?? 'AI Session - ' . now()->format('M d, H:i'),
+            'metadata'   => [],
+        ]);
+    }
+
+    /**
+     * Touch the last_message_at timestamp after each user-AI exchange.
+     */
+    public function touchLastMessage(int $conversationId): void
+    {
+        AiConversation::where('id', $conversationId)->update(['last_message_at' => now()]);
+    }
+
+    /**
+     * Update or set the conversation summary (compressed context).
+     *
+     * The summary is used to reduce token usage in long conversations.
+     * It does NOT replace the original messages — those stay in the DB.
+     */
+    public function updateSummary(int $conversationId, string $summary): void
+    {
+        AiConversation::where('id', $conversationId)->update(['summary' => $summary]);
+    }
+
+    /**
      * Mark a conversation with the active intent.
      */
     public function setCurrentIntent(AiConversation $conversation, string $intent): void

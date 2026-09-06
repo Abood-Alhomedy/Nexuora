@@ -10,10 +10,12 @@ class AiConversation extends Model
 {
     protected $fillable = [
         'user_id', 'project_id', 'title', 'current_intent', 'metadata',
+        'summary', 'last_message_at',
     ];
 
     protected $casts = [
-        'metadata' => 'array',
+        'metadata'        => 'array',
+        'last_message_at' => 'datetime',
     ];
 
     public function messages(): HasMany
@@ -29,5 +31,10 @@ class AiConversation extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Project::class);
     }
 }

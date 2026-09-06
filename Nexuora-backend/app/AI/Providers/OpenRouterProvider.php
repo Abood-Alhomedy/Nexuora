@@ -32,7 +32,7 @@ class OpenRouterProvider implements LLMProvider
         $this->model       = config('ai.model', 'openrouter/free');
         $this->maxTokens   = config('ai.max_tokens', 2048);
         $this->temperature = config('ai.temperature', 0.2);
-        $this->timeout     = config('ai.timeout', 30);
+        $this->timeout     = config('ai.timeout', 120);
         $this->maxRetries  = config('ai.max_retries', 2);
         $this->baseUrl     = config('ai.providers.openrouter.base_url', 'https://openrouter.ai/api/v1');
         $this->referer     = config('ai.providers.openrouter.referer', config('app.url', 'http://localhost'));

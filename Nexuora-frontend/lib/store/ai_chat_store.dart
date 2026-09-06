@@ -13,6 +13,8 @@ part 'ai_chat_store.g.dart';
 ///
 /// Responsibilities:
 ///  - Manage message list (observable)
+///  - Load conversation history from backend on open (persistent)
+///  - Create new conversations explicitly via API
 ///  - Call AiApiClient.sendMessage()
 ///  - On success: call AiActionExecutor.executeBatch() (if no confirmation needed)
 ///  - On confirm: call AiApiClient.confirmPlan(), then execute
@@ -25,6 +27,10 @@ abstract class _AiChatStoreBase with Store {
   final int projectId;
   final int? screenId;
 
+  // ─────────────────────────────────────────────────────────
+  // Observables
+  // ─────────────────────────────────────────────────────────
+
   @observable
   int? conversationId;
 
@@ -35,14 +41,143 @@ abstract class _AiChatStoreBase with Store {
   bool isLoading = false;
 
   @observable
+  bool isLoadingHistory = false;
+
+  @observable
   String? errorMessage;
 
   /// Pending batch awaiting user confirmation
   @observable
   AiChatMessage? pendingConfirmMessage;
 
+  /// List of conversations for this project (for the sidebar)
+  @observable
+  ObservableList<Map<String, dynamic>> conversationList =
+      ObservableList<Map<String, dynamic>>();
+
   // ─────────────────────────────────────────────────────────
-  // Actions
+  // Persistent conversation management
+  // ─────────────────────────────────────────────────────────
+
+  /// Called from initState.
+  /// Loads the most recent conversation for this project, or creates one.
+  @action
+  Future<void> loadOrCreateLastConversation() async {
+    isLoadingHistory = true;
+    errorMessage = null;
+    try {
+      final token = await getStringAsync(TOKEN);
+
+      // 1. Fetch all conversations for this project
+      final conversations = await AiApiClient.getConversations(
+        projectId: projectId,
+        token: token,
+      );
+
+      // Store list for sidebar (reversed: newest first)
+      conversationList = ObservableList.of(conversations.reversed.toList());
+
+      if (conversations.isNotEmpty) {
+        // 2a. Load the most recent conversation
+        final latest = conversations.last;
+        await loadConversation(latest['id'] as int, token: token);
+      } else {
+        // 2b. Create a fresh conversation (no messages yet)
+        await createNewConversation();
+      }
+    } catch (e) {
+      // Non-fatal: just start with empty session
+      debugPrint('[AiChatStore] loadOrCreateLastConversation failed: $e');
+    } finally {
+      isLoadingHistory = false;
+    }
+  }
+
+  /// Load a specific conversation by ID and populate messages.
+  @action
+  Future<void> loadConversation(int convId, {String? token}) async {
+    try {
+      final t = token ?? await getStringAsync(TOKEN);
+      final rawMessages = await AiApiClient.getMessages(
+        conversationId: convId,
+        token: t,
+      );
+
+      conversationId = convId;
+      messages.clear();
+      pendingConfirmMessage = null;
+
+      for (final raw in rawMessages) {
+        final role = raw['role'] == 'user'
+            ? AiMessageRole.user
+            : AiMessageRole.assistant;
+        messages.add(AiChatMessage(
+          id: raw['id'].toString(),
+          role: role,
+          content: raw['content'] ?? '',
+          timestamp: raw['created_at'] != null
+              ? DateTime.tryParse(raw['created_at'].toString()) ?? DateTime.now()
+              : DateTime.now(),
+        ));
+      }
+    } catch (e) {
+      debugPrint('[AiChatStore] loadConversation($convId) failed: $e');
+    }
+  }
+
+  /// Create a brand-new conversation via API and switch to it.
+  @action
+  Future<void> createNewConversation() async {
+    try {
+      final token = await getStringAsync(TOKEN);
+      final data = await AiApiClient.createConversation(
+        projectId: projectId,
+        token: token,
+      );
+
+      if (data != null) {
+        conversationId = data['id'] as int?;
+        // Add to sidebar list at the front
+        conversationList.insert(0, data);
+      } else {
+        // Fallback: reset to empty session without a persisted ID
+        conversationId = null;
+      }
+
+      messages.clear();
+      pendingConfirmMessage = null;
+      errorMessage = null;
+    } catch (e) {
+      debugPrint('[AiChatStore] createNewConversation failed: $e');
+      // Gracefully start fresh in memory
+      conversationId = null;
+      messages.clear();
+    }
+  }
+
+  /// Switch to a different conversation (from sidebar tap).
+  @action
+  Future<void> switchConversation(int convId) async {
+    if (convId == conversationId) return;
+    messages.clear();
+    pendingConfirmMessage = null;
+    errorMessage = null;
+    await loadConversation(convId);
+  }
+
+  /// Remove a conversation from the sidebar list after deletion.
+  @action
+  void removeConversationFromList(int convId) {
+    conversationList.removeWhere((c) => c['id'] == convId);
+    // If we deleted the currently active one, reset
+    if (conversationId == convId) {
+      conversationId = null;
+      messages.clear();
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Messaging actions
   // ─────────────────────────────────────────────────────────
 
   @action
@@ -65,6 +200,7 @@ abstract class _AiChatStoreBase with Store {
       final request = AiChatRequest(
         projectId: projectId,
         message: text.trim(),
+        userId:1,
         screenId: screenId ?? uiCtx['screen_id'],
         conversationId: conversationId,
         selectedWidgetId: uiCtx['selected_widget_id'],
@@ -142,10 +278,12 @@ abstract class _AiChatStoreBase with Store {
     pendingConfirmMessage = null;
   }
 
+  /// Clear messages from the UI only.
+  /// Does NOT reset conversationId — that would break backend continuity.
   @action
   void clearMessages() {
     messages.clear();
-    conversationId = null;
+    // NOTE: conversationId intentionally kept — do NOT reset here.
     pendingConfirmMessage = null;
     errorMessage = null;
   }

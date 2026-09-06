@@ -256,4 +256,44 @@ private function buildWidgetIndex(?array $widgetTree): array
 
     return $index;
 }
+
+    /**
+     * Enrich an existing context array with conversation history and project memories.
+     *
+     * Called by AIOrchestrator after build() to inject:
+     *  - Conversation summary (compressed past context)
+     *  - Recent messages (last N from ConversationManager)
+     *  - Relevant project memories (persistent project facts)
+     *
+     * Priority ordering (highest first):
+     *  1. ui_context  (from Flutter, already in $context from build())
+     *  2. widget_tree / widget_index (already in $context)
+     *  3. conversation_context (summary + recent messages) ← added here
+     *  4. project_memory ← added here
+     *
+     * Current UI state ALWAYS wins over any memory or conversation context.
+     *
+     * @param  array       $context          Output of build()
+     * @param  string|null $summary          From AiConversation::summary
+     * @param  array       $recentMessages   From ConversationManager::getHistory()
+     * @param  array       $projectMemories  From ProjectMemoryService::getRelevant()
+     * @return array                         Enriched context
+     */
+    public function enrichWithConversationContext(
+        array   $context,
+        ?string $summary,
+        array   $recentMessages,
+        array   $projectMemories
+    ): array {
+        // Conversation context: summary + recent message history
+        $context['conversation_context'] = [
+            'summary' => $summary,
+            'history' => $recentMessages,
+        ];
+
+        // Project memories: persistent project-level facts
+        $context['project_memory'] = $projectMemories;
+
+        return $context;
+    }
 }

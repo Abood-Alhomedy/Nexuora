@@ -44,6 +44,7 @@ class AIOrchestrator
         private Planner              $planner,
         private ActionValidator      $actionValidator,
         private ConversationManager  $conversationManager,
+        private ProjectMemoryService $memoryService,
     ) {}
 
     /**
@@ -97,22 +98,33 @@ $context = $this->contextBuilder->build(
 
         // ── 4. Conversation ──────────────────────────────────────────────────
         $conversation = $this->conversationManager->loadOrCreate($userId, $projectId, $convId);
-        $history      = $this->conversationManager->getHistory($conversation->id);
+        $history      = $this->conversationManager->getHistory(
+            $conversation->id,
+            config('ai.context.recent_messages', 15)
+        );
+
+        // ── 4b. Enrich context with conversation history + project memories ───
+        $projectMemories = $this->memoryService->getRelevant($projectId);
+        $context = $this->contextBuilder->enrichWithConversationContext(
+            $context,
+            $conversation->summary,
+            $history,
+            $projectMemories
+        );
 
         // Append user message
         $userMsg = $this->conversationManager->appendMessage(
             $conversation->id, 'user', $message
         );
 
-        // ── 5. Intent Analysis (LLM call) ────────────────────────────────────
+              // ── 5. Intent Analysis (LLM call) ────────────────────────────────────
         $usageData = ['provider' => $this->llm->getProviderName(), 'model' => $this->llm->getModelName(),
                       'project_id' => $projectId, 'conversation_id' => $conversation->id,
                       'user_id' => $userId];
         try {
-            $intentResult = $this->intentAnalyzer->analyze($message, $context, $history); 
-          \Log::debug('[AI DEBUG] Intent Result', [
-    'intent_result' => $intentResult,
-]);       } catch (LLMUnavailableException $e) {
+            $multiResult = $this->intentAnalyzer->analyze($message, $context, $history);
+            \Log::debug('[AI DEBUG] Multi Intent Result', ['result' => $multiResult]);
+        } catch (LLMUnavailableException $e) {
             $this->logUsage($usageData, 'failed', $e->getMessage(), microtime(true) - $startTime);
             return $this->error('llm_unavailable', 'AI service is temporarily unavailable. Please try again.');
         } catch (RateLimitException $e) {
@@ -120,67 +132,83 @@ $context = $this->contextBuilder->build(
             return $this->error('rate_limited', 'AI rate limit reached. Please slow down and try again.');
         }
 
-        $intent     = $intentResult['intent'];
-        $confidence = $intentResult['confidence'];
+        $tasks = $multiResult['tasks'] ?? [];
 
-        // ── 6. Low confidence or CLARIFY → ask user ──────────────────────────
-        if ($confidence === 'low' || $intent === 'CLARIFY' || $intent === 'UNKNOWN') {
-            $clarQuestion = $intentResult['clarification_question'] ?? "Could you describe more precisely what you'd like to do?";
-            $this->conversationManager->appendMessage($conversation->id, 'assistant', $clarQuestion, $intent, $confidence);
-            return $this->clarificationResponse($conversation->id, $clarQuestion, $intentResult);
+        // ── 6. If ALL tasks are low-confidence / CLARIFY / UNKNOWN ──────────
+        $executableTasks = array_filter($tasks, fn($t) =>
+            ($t['confidence'] ?? 'low') !== 'low' &&
+            !in_array($t['intent'] ?? '', ['CLARIFY', 'UNKNOWN'])
+        );
+
+        if (empty($executableTasks)) {
+            $clarQuestion = $multiResult['clarification_question']
+                ?? ($tasks[0]['clarification_question'] ?? null)
+                ?? "Could you describe more precisely what you'd like to do?";
+            $this->conversationManager->appendMessage($conversation->id, 'assistant', $clarQuestion, 'CLARIFY', 'low');
+            return $this->clarificationResponse($conversation->id, $clarQuestion, $tasks[0] ?? []);
         }
 
-        // ── 7. Target resolution ─────────────────────────────────────────────
-      \Log::debug('[AI DEBUG] Before Target Resolver', [
-    'intent_result' => $intentResult,
-    'selected_widget_id' => $uiContext['selected_widget_id'] ?? null,
-    'selected_widget_type' => $uiContext['selected_widget_type'] ?? null,
-]);
+        // ── 7-9. Process each executable task ────────────────────────────────
+        $allDescriptors      = [];
+        $requiresConfirmation = false;
+        $planPreviews        = [];
+        $actionOffset        = 0;
 
-$targetResult = $this->targetResolver->resolve(
-    $intentResult,
-    $context
-);
+        foreach ($executableTasks as $taskResult) {
+            $intent = $taskResult['intent'];
 
-\Log::debug('[AI DEBUG] Target Result', [
-    'target_result' => $targetResult,
-]);
+            // Target resolution
+            $targetResult = $this->targetResolver->resolve($taskResult, $context);
+            \Log::debug('[AI DEBUG] Task Target Result', ['intent' => $intent, 'target' => $targetResult]);
 
-        if ($targetResult['matched'] === -1 || $targetResult['matched'] === 0) {
-            // Needs clarification about which widget to target (or requested target not found)
-            $question = $targetResult['clarification_question'] ?? $targetResult['reason'] ?? 'Please select the widget you want to modify, or describe it more specifically.';
-            $this->conversationManager->appendMessage($conversation->id, 'assistant', $question, $intent, $confidence);
-            return $this->clarificationResponse($conversation->id, $question, $intentResult, $targetResult['candidates'] ?? []);
+            // Skip tasks that need clarification about target (don't block other tasks)
+            if ($targetResult['matched'] === -1 || $targetResult['matched'] === 0) {
+                continue;
+            }
+
+            // Skip ambiguous targets
+            if ($targetResult['matched'] > 1) {
+                continue;
+            }
+
+            // Skip tasks with missing parameters
+            if (!empty($taskResult['missing_parameters'])) {
+                continue;
+            }
+
+            // Build plan for this task
+            $plan = $this->planner->plan($taskResult, $targetResult, $context, $actionOffset);
+
+            // Validate
+            try {
+                $this->actionValidator->validateAll($plan['action_descriptors'], $context, $userId);
+            } catch (AIValidationException $e) {
+                \Log::warning('[AI] Validation failed for task', ['intent' => $intent, 'error' => $e->getErrors()]);
+                continue; // skip invalid task, don't block others
+            } catch (AIAuthorizationException $e) {
+                return $this->error('unauthorized', $e->getMessage());
+            }
+
+            // Collect descriptors
+            $allDescriptors   = array_merge($allDescriptors, $plan['action_descriptors']);
+            $actionOffset     += count($plan['action_descriptors']);
+            $planPreviews[]   = $plan['plan_preview'];
+            if ($plan['requires_confirmation']) {
+                $requiresConfirmation = true;
+            }
         }
 
-        if ($targetResult['matched'] > 1) {
-            // Multiple candidates — ask user to select
-            $question = 'I found multiple widgets that match. Which one do you mean?';
-            return $this->ambiguousTargetResponse($conversation->id, $question, $targetResult['candidates']);
+        if (empty($allDescriptors)) {
+            return $this->error('no_executable_tasks', 'Could not extract any executable actions from your message. Please be more specific.');
         }
 
-        // ── 8. Missing parameters ─────────────────────────────────────────────
-        if (!empty($intentResult['missing_parameters'])) {
-            $question = 'To complete this action, I also need: ' . implode(', ', $intentResult['missing_parameters']) . '.';
-            $this->conversationManager->appendMessage($conversation->id, 'assistant', $question, $intent, $confidence);
-            return $this->clarificationResponse($conversation->id, $question, $intentResult);
-        }
-
-        // ── 9. Plan ──────────────────────────────────────────────────────────
-        $plan = $this->planner->plan($intentResult, $targetResult, $context);
-
-        // ── 10. Validate ─────────────────────────────────────────────────────
-        try {
-            $this->actionValidator->validateAll($plan['action_descriptors'], $context, $userId);
-        } catch (AIValidationException $e) {
-            return $this->error('validation_failed', implode('; ', $e->getErrors()));
-        } catch (AIAuthorizationException $e) {
-            return $this->error('unauthorized', $e->getMessage());
-        }
+        // Use first task's intent/confidence for logging
+        $firstTask  = array_values($executableTasks)[0];
+        $intent     = $firstTask['intent'];
+        $confidence = $firstTask['confidence'];
 
         // ── 11. Confirmation required ─────────────────────────────────────────
-        $requiresConfirmation = $plan['requires_confirmation'];
-        $descriptorsToReturn  = $plan['action_descriptors'];
+        $descriptorsToReturn = $allDescriptors;
 
         // Save batch record
         $batch = AiActionBatch::create([
@@ -190,14 +218,14 @@ $targetResult = $this->targetResolver->resolve(
             'screen_id'          => $screenId,
             'status'             => $requiresConfirmation ? 'pending_confirmation' : 'confirmed',
             'action_descriptors' => $descriptorsToReturn,
-            'execution_metadata' => ['scope' => $scope, 'intent' => $intent],
+            'execution_metadata' => ['scope' => $scope, 'intent' => $intent, 'task_count' => count($executableTasks)],
         ]);
 
         // ── 12. Update conversation state ─────────────────────────────────────
         $this->conversationManager->setCurrentIntent($conversation, $intent);
 
-        // Append assistant message
-        $assistantContent = $plan['plan_preview'] ?? 'Here is my plan:';
+        $assistantContent = $multiResult['plan_description']
+            ?? implode(' | ', $planPreviews);
         if ($requiresConfirmation) {
             $assistantContent .= ' (waiting for your confirmation)';
         }
@@ -209,7 +237,17 @@ $targetResult = $this->targetResolver->resolve(
         // ── 13. Log usage ─────────────────────────────────────────────────────
         $this->logUsage($usageData, 'success', null, microtime(true) - $startTime);
 
-        // ── 14. Return to controller (Flutter will execute) ───────────────────
+        // ── 14. Post-process ──────────────────────────────────────────────────
+        try {
+            $this->conversationManager->touchLastMessage($conversation->id);
+            $this->memoryService->extractFromAssistantResponse(
+                $projectId, $conversation->id, $message, $assistantContent, $this->llm
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[AI] Non-critical post-process error', ['error' => $e->getMessage()]);
+        }
+
+        // ── 15. Return to controller ──────────────────────────────────────────
         return [
             'status'               => true,
             'conversation_id'      => $conversation->id,
@@ -219,7 +257,7 @@ $targetResult = $this->targetResolver->resolve(
             'confidence'           => $confidence,
             'message'              => $assistantContent,
             'requires_confirmation'=> $requiresConfirmation,
-            'plan_preview'         => $requiresConfirmation ? $plan['plan_preview'] : null,
+            'plan_preview'         => $requiresConfirmation ? $assistantContent : null,
             'action_descriptors'   => $requiresConfirmation ? [] : $descriptorsToReturn,
             'pending_descriptors'  => $requiresConfirmation ? $descriptorsToReturn : [],
             'error_type'           => null,

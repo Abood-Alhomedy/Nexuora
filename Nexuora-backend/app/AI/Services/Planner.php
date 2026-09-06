@@ -23,7 +23,7 @@ class Planner
      * @param  array  $context       from ContextBuilder
      * @return array  { action_descriptors: array, requires_confirmation: bool, plan_preview: string }
      */
-    public function plan(array $intentResult, array $targetResult, array $context): array
+    public function plan(array $intentResult, array $targetResult, array $context, int $actionOffset = 0): array
     {
         $intent     = $intentResult['intent'];
         $params     = $intentResult['parameters'] ?? [];
@@ -34,41 +34,41 @@ class Planner
 
         switch ($intent) {
             case 'ADD_WIDGET':
-                return $this->planAddWidget($params, $targetResult, $context, $requiresConfirmation);
+                return $this->planAddWidget($params, $targetResult, $context, $requiresConfirmation, $actionOffset);
 
             case 'UPDATE_WIDGET':
             case 'UPDATE_PROPERTY':
             case 'UPDATE_STYLE':
-                return $this->planUpdateWidget($widgetId, $params, $requiresConfirmation);
+                return $this->planUpdateWidget($widgetId, $params, $requiresConfirmation, $actionOffset);
 
             case 'DELETE_WIDGET':
-                return $this->planDeleteWidget($widgetId, $requiresConfirmation);
+                return $this->planDeleteWidget($widgetId, $requiresConfirmation, $actionOffset);
 
             case 'MOVE_WIDGET':
-                return $this->planMoveWidget($widgetId, $params, $requiresConfirmation);
+                return $this->planMoveWidget($widgetId, $params, $requiresConfirmation, $actionOffset);
 
             case 'DUPLICATE_WIDGET':
-                return $this->planDuplicateWidget($widgetId, $requiresConfirmation);
+                return $this->planDuplicateWidget($widgetId, $requiresConfirmation, $actionOffset);
 
             case 'CREATE_SCREEN':
-                return $this->planCreateScreen($params, $requiresConfirmation);
+                return $this->planCreateScreen($params, $requiresConfirmation, $actionOffset);
 
             case 'DELETE_SCREEN':
                 $screenId = $targetResult['widget_id'] ?? $params['screen_id'] ?? null;
-                return $this->planDeleteScreen($screenId, $requiresConfirmation);
+                return $this->planDeleteScreen($screenId, $requiresConfirmation, $actionOffset);
 
             case 'RENAME_SCREEN':
                 $screenId = $params['screen_id'] ?? null;
-                return $this->planRenameScreen($screenId, $params, $requiresConfirmation);
+                return $this->planRenameScreen($screenId, $params, $requiresConfirmation, $actionOffset);
 
             case 'ADD_NAVIGATION':
-                return $this->planAddNavigation($widgetId, $params, $context, $requiresConfirmation);
+                return $this->planAddNavigation($widgetId, $params, $context, $requiresConfirmation, $actionOffset);
 
             case 'REMOVE_NAVIGATION':
-                return $this->planRemoveNavigation($widgetId, $requiresConfirmation);
+                return $this->planRemoveNavigation($widgetId, $requiresConfirmation, $actionOffset);
 
             case 'UPDATE_THEME':
-                return $this->planUpdateTheme($params, $requiresConfirmation);
+                return $this->planUpdateTheme($params, $requiresConfirmation, $actionOffset);
 
             default:
                 return [
@@ -83,12 +83,7 @@ class Planner
     // Action plan builders
     // ─────────────────────────────────────────────────────────
 
-private function planAddWidget(
-    array $params,
-    array $targetResult,
-    array $context,
-    bool $confirm
-): array {
+private function planAddWidget(array $params, array $targetResult, array $context, bool $confirm, int $offset = 0): array  {
     $widgetType = $params['widget_type'] ?? 'Container';
 
     $parentId = $targetResult['widget_id']
@@ -102,14 +97,27 @@ private function planAddWidget(
      * This is important because properties may exist as an empty
      * array while the actual text/value is present directly in params.
      */
-    $properties = $this->getDefaultProperties($widgetType, $params);
+// Build defaults first
+$properties = $this->getDefaultProperties($widgetType, $params);
 
-    if (!empty($params['properties']) && is_array($params['properties'])) {
-        $properties = array_merge($properties, $params['properties']);
+// Merge explicit properties from params.properties (highest priority)
+if (!empty($params['properties']) && is_array($params['properties'])) {
+    $properties = array_merge($properties, $params['properties']);
+}
+
+// Also check direct keys in params for common widget properties
+$directKeys = ['text', 'label', 'backgroundColor', 'color', 'textColor',
+               'fontSize', 'fontWeight', 'borderRadius', 'width', 'height',
+               'padding', 'margin', 'opacity', 'visible', 'enabled',
+               'hintText', 'title', 'icon'];
+foreach ($directKeys as $key) {
+    if (isset($params[$key]) && !isset($properties[$key])) {
+        $properties[$key] = $params[$key];
     }
+}
 
     $descriptor = [
-        'action_id' => 'a1',
+        'action_id' => 'a' . ($offset + 1),
         'type' => 'ADD_WIDGET',
 
         'target' => [
@@ -134,9 +142,18 @@ private function planAddWidget(
     ];
 }
 
-    private function planUpdateWidget(?string $widgetId, array $params, bool $confirm): array
-    {
-        $properties = $params['properties'] ?? $params['style_properties'] ?? [];
+private function planUpdateWidget(?string $widgetId, array $params, bool $confirm, int $offset = 0): array {        $properties = $params['properties'] ?? $params['style_properties'] ?? [];
+
+        // معالجة خطأ الترجمة الحرفية من الذكاء الاصطناعي (property_name / property_value)
+        if (isset($properties['property_name']) && isset($properties['property_value'])) {
+            $realProp = $properties['property_name'];
+            $realVal  = $properties['property_value'];
+            unset($properties['property_name'], $properties['property_value']);
+            $properties[$realProp] = $realVal;
+        } elseif (isset($params['property_name']) && isset($params['property_value'])) {
+            $properties[$params['property_name']] = $params['property_value'];
+            unset($params['property_name'], $params['property_value']);
+        }
 
         // Handle direct property params (e.g., "backgroundColor" => "#FF0000")
         if (empty($properties)) {
@@ -146,7 +163,7 @@ private function planAddWidget(
 
         return [
             'action_descriptors' => [[
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'UPDATE_WIDGET',
                 'target'    => ['widget_id' => $widgetId],
                 'payload'   => ['properties' => $properties],
@@ -156,11 +173,9 @@ private function planAddWidget(
         ];
     }
 
-    private function planDeleteWidget(?string $widgetId, bool $confirm): array
-    {
-        return [
+private function planDeleteWidget(?string $widgetId, bool $confirm, int $offset = 0): array {        return [
             'action_descriptors' => [[
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'DELETE_WIDGET',
                 'target'    => ['widget_id' => $widgetId],
                 'payload'   => [],
@@ -170,12 +185,10 @@ private function planAddWidget(
         ];
     }
 
-    private function planMoveWidget(?string $widgetId, array $params, bool $confirm): array
-    {
-        $direction = $params['direction'] ?? 'up';
+private function planMoveWidget(array $params, array $targetResult, array $context, bool $confirm, int $offset = 0): array {        $direction = $params['direction'] ?? 'up';
         return [
             'action_descriptors' => [[
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'MOVE_WIDGET',
                 'target'    => ['widget_id' => $widgetId],
                 'payload'   => ['direction' => $direction],
@@ -185,11 +198,9 @@ private function planAddWidget(
         ];
     }
 
-    private function planDuplicateWidget(?string $widgetId, bool $confirm): array
-    {
-        return [
+private function planDuplicateWidget(?string $widgetId, bool $confirm, int $offset = 0): array {        return [
             'action_descriptors' => [[
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'DUPLICATE_WIDGET',
                 'target'    => ['widget_id' => $widgetId],
                 'payload'   => ['new_widget_id' => null], // Flutter generates
@@ -199,14 +210,12 @@ private function planAddWidget(
         ];
     }
 
-    private function planCreateScreen(array $params, bool $confirm): array
-    {
-        $screenName = $params['screen_name'] ?? 'New Screen';
+private function planCreateScreen(array $params, bool $confirm, int $offset = 0): array {        $screenName = $params['screen_name'] ?? 'New Screen';
 
         // A basic screen = Scaffold + Column (2 actions)
         $descriptors = [
             [
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'CREATE_SCREEN',
                 'target'    => [],
                 'payload'   => [
@@ -239,11 +248,9 @@ private function planAddWidget(
         ];
     }
 
-    private function planDeleteScreen(?string $screenId, bool $confirm): array
-    {
-        return [
+private function planDeleteScreen(array $params, array $targetResult, array $context, bool $confirm, int $offset = 0): array {        return [
             'action_descriptors' => [[
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'DELETE_SCREEN',
                 'target'    => ['screen_id' => $screenId],
                 'payload'   => [],
@@ -253,11 +260,9 @@ private function planAddWidget(
         ];
     }
 
-    private function planRenameScreen(?string $screenId, array $params, bool $confirm): array
-    {
-        return [
+private function planRenameScreen(?string $screenId, array $params, bool $confirm, int $offset = 0): array {        return [
             'action_descriptors' => [[
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'RENAME_SCREEN',
                 'target'    => ['screen_id' => $screenId],
                 'payload'   => ['new_name' => $params['new_name'] ?? ''],
@@ -267,31 +272,27 @@ private function planAddWidget(
         ];
     }
 
-    private function planAddNavigation(?string $widgetId, array $params, array $context, bool $confirm): array
-    {
-        // Navigation is achieved by setting the widget's onPressed property
+private function planAddNavigation(?string $widgetId, array $params, array $context, bool $confirm, int $offset = 0): array {        // Navigation is achieved by setting the widget's onPressed property
         // No new navigation engine — uses existing widget property system
         $destScreen = $params['destination_screen_name'] ?? $params['screen_name'] ?? '';
         return [
-            'action_descriptors' => [[
-                'action_id' => 'a1',
-                'type'      => 'ADD_NAVIGATION',
-                'target'    => ['widget_id' => $widgetId],
-                'payload'   => [
-                    'destination_screen_name' => $destScreen,
-                    'navigation_type'         => $params['navigation_type'] ?? 'push',
-                ],
-            ]],
+          'action_descriptors' => [[
+    'action_id' => 'a' . ($offset + 1),
+    'type'      => 'ADD_NAVIGATION',
+    'target'    => ['widget_id' => $widgetId],
+    'payload'   => [
+        'destination_screen_name' => $destScreen,
+        'navigation_type'         => $params['navigation_type'] ?? 'push',
+    ],
+]],
             'requires_confirmation' => $confirm,
             'plan_preview'         => "Add navigation to '{$destScreen}' on button tap",
         ];
     }
 
-    private function planRemoveNavigation(?string $widgetId, bool $confirm): array
-    {
-        return [
+private function planRemoveNavigation(?string $widgetId, bool $confirm, int $offset = 0): array {        return [
             'action_descriptors' => [[
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'REMOVE_NAVIGATION',
                 'target'    => ['widget_id' => $widgetId],
                 'payload'   => [],
@@ -301,11 +302,10 @@ private function planAddWidget(
         ];
     }
 
-    private function planUpdateTheme(array $params, bool $confirm): array
-    {
+private function planUpdateTheme(array $params, bool $confirm, int $offset = 0): array {
         return [
             'action_descriptors' => [[
-                'action_id' => 'a1',
+                'action_id' => 'a' . ($offset + 1),
                 'type'      => 'UPDATE_THEME',
                 'target'    => [],
                 'payload'   => ['theme_properties' => $params['theme_properties'] ?? $params],

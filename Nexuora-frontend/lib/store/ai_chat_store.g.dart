@@ -57,6 +57,22 @@ mixin _$AiChatStore on _AiChatStoreBase, Store {
     });
   }
 
+  late final _$isLoadingHistoryAtom =
+      Atom(name: '_AiChatStoreBase.isLoadingHistory', context: context);
+
+  @override
+  bool get isLoadingHistory {
+    _$isLoadingHistoryAtom.reportRead();
+    return super.isLoadingHistory;
+  }
+
+  @override
+  set isLoadingHistory(bool value) {
+    _$isLoadingHistoryAtom.reportWrite(value, super.isLoadingHistory, () {
+      super.isLoadingHistory = value;
+    });
+  }
+
   late final _$errorMessageAtom =
       Atom(name: '_AiChatStoreBase.errorMessage', context: context);
 
@@ -90,6 +106,59 @@ mixin _$AiChatStore on _AiChatStoreBase, Store {
     });
   }
 
+  late final _$conversationListAtom =
+      Atom(name: '_AiChatStoreBase.conversationList', context: context);
+
+  @override
+  ObservableList<Map<String, dynamic>> get conversationList {
+    _$conversationListAtom.reportRead();
+    return super.conversationList;
+  }
+
+  @override
+  set conversationList(ObservableList<Map<String, dynamic>> value) {
+    _$conversationListAtom.reportWrite(value, super.conversationList, () {
+      super.conversationList = value;
+    });
+  }
+
+  late final _$loadOrCreateLastConversationAsyncAction = AsyncAction(
+      '_AiChatStoreBase.loadOrCreateLastConversation',
+      context: context);
+
+  @override
+  Future<void> loadOrCreateLastConversation() {
+    return _$loadOrCreateLastConversationAsyncAction
+        .run(() => super.loadOrCreateLastConversation());
+  }
+
+  late final _$loadConversationAsyncAction =
+      AsyncAction('_AiChatStoreBase.loadConversation', context: context);
+
+  @override
+  Future<void> loadConversation(int convId, {String? token}) {
+    return _$loadConversationAsyncAction
+        .run(() => super.loadConversation(convId, token: token));
+  }
+
+  late final _$createNewConversationAsyncAction =
+      AsyncAction('_AiChatStoreBase.createNewConversation', context: context);
+
+  @override
+  Future<void> createNewConversation() {
+    return _$createNewConversationAsyncAction
+        .run(() => super.createNewConversation());
+  }
+
+  late final _$switchConversationAsyncAction =
+      AsyncAction('_AiChatStoreBase.switchConversation', context: context);
+
+  @override
+  Future<void> switchConversation(int convId) {
+    return _$switchConversationAsyncAction
+        .run(() => super.switchConversation(convId));
+  }
+
   late final _$sendMessageAsyncAction =
       AsyncAction('_AiChatStoreBase.sendMessage', context: context);
 
@@ -110,6 +179,17 @@ mixin _$AiChatStore on _AiChatStoreBase, Store {
 
   late final _$_AiChatStoreBaseActionController =
       ActionController(name: '_AiChatStoreBase', context: context);
+
+  @override
+  void removeConversationFromList(int convId) {
+    final _$actionInfo = _$_AiChatStoreBaseActionController.startAction(
+        name: '_AiChatStoreBase.removeConversationFromList');
+    try {
+      return super.removeConversationFromList(convId);
+    } finally {
+      _$_AiChatStoreBaseActionController.endAction(_$actionInfo);
+    }
+  }
 
   @override
   void cancelPlan() {
@@ -139,8 +219,10 @@ mixin _$AiChatStore on _AiChatStoreBase, Store {
 conversationId: ${conversationId},
 messages: ${messages},
 isLoading: ${isLoading},
+isLoadingHistory: ${isLoadingHistory},
 errorMessage: ${errorMessage},
-pendingConfirmMessage: ${pendingConfirmMessage}
+pendingConfirmMessage: ${pendingConfirmMessage},
+conversationList: ${conversationList}
     ''';
   }
 }
